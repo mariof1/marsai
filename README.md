@@ -4,7 +4,17 @@
 
 ## Install
 
+One-liner install on any Linux machine (installs Node.js automatically if needed):
+
 ```bash
+curl -fsSL https://raw.githubusercontent.com/mariof1/marsai/main/install.sh | bash
+```
+
+Or install manually from source:
+
+```bash
+git clone https://github.com/mariof1/marsai.git
+cd marsai
 npm install -g .
 ```
 
