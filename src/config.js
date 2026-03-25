@@ -37,7 +37,7 @@ function getApiKey() {
 
 function getModel() {
   const config = loadConfig();
-  return process.env.MARSAI_MODEL || config.model || 'meta-llama/llama-3.3-70b-instruct:free';
+  return process.env.MARSAI_MODEL || config.model || 'openrouter/free';
 }
 
 function getSystemPrompt() {
