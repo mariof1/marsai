@@ -10,11 +10,18 @@
     "start": "node bin/marsai.js",
     "test": "node test/test.js"
   },
-  "keywords": ["cli", "ai", "chatbot", "openrouter"],
+  "keywords": [
+    "cli",
+    "ai",
+    "chatbot",
+    "openrouter"
+  ],
   "author": "mariof1",
   "license": "MIT",
   "dependencies": {
     "chalk": "^4.1.2",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.0",
     "readline": "^1.3.0"
   }
 }

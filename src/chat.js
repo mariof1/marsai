@@ -4,6 +4,7 @@ const readline = require('readline');
 const https = require('https');
 const { streamChat } = require('./api');
 const { getModel, getSystemPrompt } = require('./config');
+const { renderMarkdown } = require('./render');
 
 const COMMANDS = {
   '/help': 'Show available commands',
@@ -115,18 +116,43 @@ class Chat {
   async sendMessage(content) {
     this.messages.push({ role: 'user', content });
 
+    const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let spinIdx = 0;
+    let chunks = 0;
+
     process.stdout.write(this.chalk.magenta('\n  MarsAI ') + this.chalk.dim('› '));
+    const spinTimer = setInterval(() => {
+      if (chunks === 0) {
+        process.stdout.write(`\r  ${this.chalk.magenta(spinner[spinIdx++ % spinner.length])} ${this.chalk.dim('Thinking...')}`);
+      }
+    }, 80);
 
     try {
       const response = await streamChat(this.apiKey, this.model, this.messages, (chunk) => {
-        process.stdout.write(chunk);
+        if (chunks === 0) {
+          // Clear spinner line on first chunk
+          process.stdout.write('\r\x1b[K');
+        }
+        chunks++;
       });
-      process.stdout.write('\n\n');
+
+      clearInterval(spinTimer);
+      // Clear any spinner remnant and render formatted response
+      process.stdout.write('\r\x1b[K');
+      const formatted = renderMarkdown(response);
+      // Indent each line for consistent look
+      const indented = formatted
+        .split('\n')
+        .map((line) => '  ' + line)
+        .join('\n');
+      process.stdout.write(this.chalk.magenta('  MarsAI ') + this.chalk.dim('›\n'));
+      process.stdout.write(indented + '\n');
+
       this.messages.push({ role: 'assistant', content: response });
     } catch (err) {
-      process.stdout.write('\n');
+      clearInterval(spinTimer);
+      process.stdout.write('\r\x1b[K');
       console.error(this.chalk.red(`  Error: ${err.message}\n`));
-      // Remove the failed user message
       this.messages.pop();
     }
   }
