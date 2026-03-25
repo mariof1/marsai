@@ -31,8 +31,7 @@ class Chat {
   }
 
   writeStatusBar() {
-    if (!this.keyInfo || !process.stdout.columns) return;
-    const cols = process.stdout.columns;
+    if (!this.keyInfo) return;
     const info = this.keyInfo;
 
     const parts = [];
@@ -44,11 +43,8 @@ class Chat {
     }
     parts.push(`Today: $${(info.usage_daily || 0).toFixed(4)}`);
 
-    const status = parts.join(' │ ');
-    const padded = status.padStart(cols);
-
-    // Save cursor, move to top-right, print, restore cursor
-    process.stdout.write(`\x1b7\x1b[s\x1b[1;1H\x1b[2K${this.chalk.dim(padded)}\x1b[u\x1b8`);
+    const status = parts.join(' · ');
+    console.log(this.chalk.dim(`  ─── ${status} ───`));
   }
 
   async refreshKeyInfo() {
