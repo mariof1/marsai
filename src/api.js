@@ -4,7 +4,14 @@ const https = require('https');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-function streamChat(apiKey, model, messages, onChunk) {
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [3000, 8000, 15000];
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function streamChat(apiKey, model, messages, onChunk, retries = 0) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model,
@@ -30,9 +37,26 @@ function streamChat(apiKey, model, messages, onChunk) {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
+          // Retry on rate limit (429) or server errors (5xx)
+          if ((res.statusCode === 429 || res.statusCode >= 500) && retries < MAX_RETRIES) {
+            const delay = RETRY_DELAYS[retries] || 5000;
+            const secs = (delay / 1000).toFixed(0);
+            onChunk(`\n  ⏳ Rate limited — retrying in ${secs}s (${retries + 1}/${MAX_RETRIES})...`);
+            sleep(delay)
+              .then(() => streamChat(apiKey, model, messages, onChunk, retries + 1))
+              .then(resolve)
+              .catch(reject);
+            return;
+          }
+
           try {
             const parsed = JSON.parse(data);
-            reject(new Error(`API error (${res.statusCode}): ${parsed.error?.message || data}`));
+            const msg = parsed.error?.message || data;
+            if (res.statusCode === 429) {
+              reject(new Error(`Rate limited. Free-tier models have usage caps. Try again in a minute or switch model with /model`));
+            } else {
+              reject(new Error(`API error (${res.statusCode}): ${msg}`));
+            }
           } catch {
             reject(new Error(`API error (${res.statusCode}): ${data}`));
           }
