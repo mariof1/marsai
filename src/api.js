@@ -115,3 +115,28 @@ async function streamChat(apiKey, model, messages, onChunk) {
 }
 
 module.exports = { streamChat };
+
+function fetchKeyInfo(apiKey) {
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: 'openrouter.ai',
+      path: '/api/v1/key',
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data).data || null);
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+module.exports = { streamChat, fetchKeyInfo };

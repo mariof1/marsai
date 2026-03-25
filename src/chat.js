@@ -2,7 +2,7 @@
 
 const readline = require('readline');
 const https = require('https');
-const { streamChat } = require('./api');
+const { streamChat, fetchKeyInfo } = require('./api');
 const { getModel, getSystemPrompt, generateSessionId, saveSession, loadSession, listSessions, getLastSessionId } = require('./config');
 const { renderMarkdown } = require('./render');
 
@@ -27,6 +27,36 @@ class Chat {
     this.messages = [{ role: 'system', content: this.systemPrompt }];
     this.sessionId = generateSessionId();
     this.cachedModels = [];
+    this.keyInfo = null;
+  }
+
+  writeStatusBar() {
+    if (!this.keyInfo || !process.stdout.columns) return;
+    const cols = process.stdout.columns;
+    const info = this.keyInfo;
+
+    const parts = [];
+    if (info.is_free_tier) {
+      parts.push('Free tier');
+    }
+    if (info.limit_remaining !== null && info.limit_remaining !== undefined) {
+      parts.push(`Credits: $${info.limit_remaining.toFixed(4)}`);
+    }
+    parts.push(`Today: $${(info.usage_daily || 0).toFixed(4)}`);
+
+    const status = parts.join(' │ ');
+    const padded = status.padStart(cols);
+
+    // Save cursor, move to top-right, print, restore cursor
+    process.stdout.write(`\x1b7\x1b[s\x1b[1;1H\x1b[2K${this.chalk.dim(padded)}\x1b[u\x1b8`);
+  }
+
+  async refreshKeyInfo() {
+    const info = await fetchKeyInfo(this.apiKey);
+    if (info) {
+      this.keyInfo = info;
+      this.writeStatusBar();
+    }
   }
 
   async handleCommand(input) {
@@ -232,6 +262,7 @@ class Chat {
 
       this.messages.push({ role: 'assistant', content: response });
       this.persistSession();
+      this.refreshKeyInfo().catch(() => {});
     } catch (err) {
       clearInterval(spinTimer);
       process.stdout.write('\r\x1b[K');
@@ -243,8 +274,9 @@ class Chat {
   async startLoop() {
     const commandNames = Object.keys(COMMANDS);
 
-    // Pre-fetch models in background for tab completion
+    // Pre-fetch models and key info in background for tab completion and status
     this.fetchModels().catch(() => {});
+    this.refreshKeyInfo().catch(() => {});
 
     const completer = (line) => {
       const lower = line.toLowerCase();
