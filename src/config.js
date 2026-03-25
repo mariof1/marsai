@@ -49,7 +49,31 @@ function getModel() {
 
 function getSystemPrompt() {
   const config = loadConfig();
-  return config.systemPrompt || 'You are MarsAI, a helpful and concise CLI assistant. Provide clear, actionable answers. Use markdown formatting when helpful. Keep responses focused and practical.';
+  if (config.systemPrompt) return config.systemPrompt;
+
+  const os = require('os');
+  const sysInfo = `${os.type()} ${os.release()} (${os.arch()})`;
+  const user = os.userInfo().username;
+  const cwd = process.cwd();
+  const shell = process.env.SHELL || '/bin/bash';
+
+  return `You are MarsAI, an AI-powered CLI assistant with direct access to the user's terminal environment.
+
+System: ${sysInfo}
+User: ${user}
+Shell: ${shell}
+Working directory: ${cwd}
+
+You can execute commands on the user's system. When you want to run a command, wrap it in <run_command> tags like this:
+<run_command>command here</run_command>
+
+Rules for command execution:
+- The user will be asked to confirm before any command runs.
+- You can run multiple commands by using multiple <run_command> tags.
+- After a command runs, you will receive its output and can analyze it or run follow-up commands.
+- Always explain what a command does before running it.
+- For destructive or elevated commands (rm -rf, sudo, etc.), warn the user clearly.
+- Use markdown formatting for explanations. Keep responses focused and practical.`;
 }
 
 function promptForApiKey() {

@@ -6,6 +6,7 @@ const { streamChat, fetchKeyInfo } = require('./api');
 const { getModel, getSystemPrompt, generateSessionId, saveSession, loadSession, listSessions, getLastSessionId } = require('./config');
 const { renderMarkdown } = require('./render');
 const { StatusBar } = require('./statusbar');
+const { extractCommands, stripCommandTags, processCommandsInResponse, buildCommandResultMessage } = require('./executor');
 
 const COMMANDS = {
   '/help': 'Show available commands',
@@ -247,15 +248,33 @@ class Chat {
 
       clearInterval(spinTimer);
       process.stdout.write('\r\x1b[K');
-      const formatted = renderMarkdown(response);
-      const indented = formatted
-        .split('\n')
-        .map((line) => '  ' + line)
-        .join('\n');
-      process.stdout.write(this.chalk.magenta('  MarsAI ') + this.chalk.dim('›\n'));
-      process.stdout.write(indented + '\n');
+
+      // Display the text portion (without command tags)
+      const displayText = stripCommandTags(response);
+      if (displayText) {
+        const formatted = renderMarkdown(displayText);
+        const indented = formatted
+          .split('\n')
+          .map((line) => '  ' + line)
+          .join('\n');
+        process.stdout.write(this.chalk.magenta('  MarsAI ') + this.chalk.dim('›\n'));
+        process.stdout.write(indented + '\n');
+      }
 
       this.messages.push({ role: 'assistant', content: response });
+
+      // Check for commands to execute
+      const commands = extractCommands(response);
+      if (commands.length > 0) {
+        const results = await processCommandsInResponse(this.chalk, response);
+        if (results && results.some((r) => !r.skipped)) {
+          // Feed results back to the AI for analysis
+          const resultMsg = buildCommandResultMessage(results);
+          await this.sendMessage(resultMsg);
+          return; // sendMessage recurses, so skip the rest
+        }
+      }
+
       this.persistSession();
       this.refreshKeyInfo().catch(() => {});
     } catch (err) {
