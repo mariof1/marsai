@@ -1,6 +1,7 @@
 'use strict';
 
 const readline = require('readline');
+const https = require('https');
 const { streamChat } = require('./api');
 const { getModel, getSystemPrompt } = require('./config');
 
@@ -8,6 +9,7 @@ const COMMANDS = {
   '/help': 'Show available commands',
   '/clear': 'Clear conversation history',
   '/model': 'Show or set model (e.g. /model google/gemini-2.0-flash-exp:free)',
+  '/models': 'List available free models from OpenRouter',
   '/system': 'Show current system prompt',
   '/history': 'Show conversation history',
   '/exit': 'Exit MarsAI',
@@ -49,6 +51,10 @@ class Chat {
         }
         return true;
 
+      case '/models':
+        this.listFreeModels();
+        return true;
+
       case '/system':
         console.log(this.chalk.cyan(`System prompt: ${this.systemPrompt}\n`));
         return true;
@@ -75,6 +81,35 @@ class Chat {
       default:
         return false;
     }
+  }
+
+  listFreeModels() {
+    console.log(this.chalk.cyan('\n  Fetching free models...\n'));
+    https.get('https://openrouter.ai/api/v1/models', (res) => {
+      let data = '';
+      res.on('data', (chunk) => (data += chunk));
+      res.on('end', () => {
+        try {
+          const models = JSON.parse(data).data || [];
+          const free = models
+            .filter((m) => m.pricing?.prompt === '0' && m.pricing?.completion === '0')
+            .sort((a, b) => a.id.localeCompare(b.id));
+          if (free.length === 0) {
+            console.log(this.chalk.yellow('  No free models found.\n'));
+            return;
+          }
+          for (const m of free) {
+            const ctx = m.context_length ? ` (${(m.context_length / 1024).toFixed(0)}k ctx)` : '';
+            console.log(`  ${this.chalk.yellow(m.id)}${this.chalk.dim(ctx)}`);
+          }
+          console.log(this.chalk.dim(`\n  ${free.length} free models. Use /model <id> to switch.\n`));
+        } catch {
+          console.log(this.chalk.red('  Failed to fetch models.\n'));
+        }
+      });
+    }).on('error', () => {
+      console.log(this.chalk.red('  Failed to fetch models.\n'));
+    });
   }
 
   async sendMessage(content) {

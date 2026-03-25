@@ -13,7 +13,13 @@ function sleep(ms) {
 
 function makeRequest(apiKey, model, messages, stream) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ model, messages, stream });
+    const body = JSON.stringify({
+      model,
+      messages,
+      stream,
+      route: 'fallback',
+      provider: { allow_fallbacks: true },
+    });
     const url = new URL(OPENROUTER_API_URL);
 
     const req = https.request({
