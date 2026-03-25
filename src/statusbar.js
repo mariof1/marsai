@@ -9,20 +9,18 @@ class StatusBar {
     this.rightText = '';
     this.enabled = process.stdout.isTTY || false;
     this.active = false;
+    this._resizeHandler = null;
   }
 
   activate() {
     if (!this.enabled) return;
     this.active = true;
-    this._setScrollRegion();
-    this._draw();
+    this._setup();
 
-    process.stdout.on('resize', () => {
-      if (this.active) {
-        this._setScrollRegion();
-        this._draw();
-      }
-    });
+    this._resizeHandler = () => {
+      if (this.active) this._setup();
+    };
+    process.stdout.on('resize', this._resizeHandler);
   }
 
   deactivate() {
@@ -33,32 +31,25 @@ class StatusBar {
     process.stdout.write(`\x1b[1;${rows}r`);
     // Clear the status bar line
     process.stdout.write(`\x1b[${rows};1H\x1b[2K`);
-    // Move cursor back into content area
+    // Move cursor up
     process.stdout.write(`\x1b[${rows - 1};1H`);
+
+    if (this._resizeHandler) {
+      process.stdout.removeListener('resize', this._resizeHandler);
+    }
   }
 
   update(left, right) {
-    this.leftText = left || this.leftText;
-    this.rightText = right || this.rightText;
+    if (left !== undefined) this.leftText = left;
+    if (right !== undefined) this.rightText = right;
     if (this.active) this._draw();
   }
 
-  updateRight(text) {
-    this.rightText = text;
-    if (this.active) this._draw();
-  }
-
-  updateLeft(text) {
-    this.leftText = text;
-    if (this.active) this._draw();
-  }
-
-  _setScrollRegion() {
+  _setup() {
     const rows = process.stdout.rows || 24;
-    // Reserve the bottom line for the status bar; scroll region is rows 1 to rows-1
+    // Set scroll region to exclude last line
     process.stdout.write(`\x1b[1;${rows - 1}r`);
-    // Move cursor into the scroll region
-    process.stdout.write(`\x1b[${rows - 1};1H`);
+    this._draw();
   }
 
   _draw() {
@@ -78,11 +69,11 @@ class StatusBar {
     const bar = left + ' '.repeat(gap) + right;
 
     // Save cursor, move to bottom row, draw bar, restore cursor
-    process.stdout.write('\x1b7'); // save cursor
-    process.stdout.write(`\x1b[${rows};1H`); // move to bottom
+    process.stdout.write('\x1b[s'); // save cursor position
+    process.stdout.write(`\x1b[${rows};1H`); // move to last row
     process.stdout.write('\x1b[2K'); // clear line
-    process.stdout.write(`\x1b[7m${bar}\x1b[0m`); // reverse video for bar
-    process.stdout.write('\x1b8'); // restore cursor
+    process.stdout.write(`\x1b[7m${bar}\x1b[0m`); // reverse video
+    process.stdout.write('\x1b[u'); // restore cursor position
   }
 }
 

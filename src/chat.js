@@ -60,7 +60,7 @@ class Chat {
     }
     parts.push(`Today: $${(info.usage_daily || 0).toFixed(4)}`);
 
-    this.statusBar.updateRight(parts.join(' │ '));
+    this.statusBar.update(undefined, parts.join(' │ '));
   }
 
   async refreshKeyInfo() {
@@ -332,10 +332,9 @@ class Chat {
 
     // Activate persistent bottom status bar
     this.statusBar.activate();
-    this.statusBar.update(
-      ' /help Commands  /model Switch model  /resume Resume  Ctrl+C Exit',
-      ' Connecting...'
-    );
+
+    const leftHints = ' /help Commands  /model Switch model  /resume Resume  Ctrl+C Exit';
+    this.statusBar.update(leftHints, '');
 
     // Pre-fetch models and key info in background for tab completion and status
     this.fetchModels().catch(() => {});
