@@ -26,9 +26,10 @@ class Chat {
     this.systemPrompt = getSystemPrompt();
     this.messages = [{ role: 'system', content: this.systemPrompt }];
     this.sessionId = generateSessionId();
+    this.cachedModels = [];
   }
 
-  handleCommand(input) {
+  async handleCommand(input) {
     const parts = input.trim().split(/\s+/);
     const cmd = parts[0].toLowerCase();
 
@@ -50,14 +51,14 @@ class Chat {
       case '/model':
         if (parts.length > 1) {
           this.model = parts[1];
-          console.log(this.chalk.green(`Model set to: ${this.model}\n`));
+          console.log(this.chalk.green(`  Model set to: ${this.model}\n`));
         } else {
-          console.log(this.chalk.cyan(`Current model: ${this.model}\n`));
+          console.log(this.chalk.cyan(`  Current model: ${this.model}\n`));
         }
         return true;
 
       case '/models':
-        this.listFreeModels();
+        await this.listFreeModels();
         return true;
 
       case '/resume':
@@ -69,13 +70,13 @@ class Chat {
         return true;
 
       case '/system':
-        console.log(this.chalk.cyan(`System prompt: ${this.systemPrompt}\n`));
+        console.log(this.chalk.cyan(`  System prompt: ${this.systemPrompt}\n`));
         return true;
 
       case '/history':
         const userMsgs = this.messages.filter((m) => m.role !== 'system');
         if (userMsgs.length === 0) {
-          console.log(this.chalk.dim('No conversation history.\n'));
+          console.log(this.chalk.dim('  No conversation history.\n'));
         } else {
           for (const m of userMsgs) {
             const label = m.role === 'user' ? this.chalk.green('You') : this.chalk.magenta('MarsAI');
@@ -93,37 +94,47 @@ class Chat {
         return 'exit';
 
       default:
-        return false;
+        console.log(this.chalk.yellow(`  Unknown command: ${cmd}. Type /help for available commands.\n`));
+        return true;
     }
   }
 
-  listFreeModels() {
-    console.log(this.chalk.cyan('\n  Fetching free models...\n'));
-    https.get('https://openrouter.ai/api/v1/models', (res) => {
-      let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
-        try {
-          const models = JSON.parse(data).data || [];
-          const free = models
-            .filter((m) => m.pricing?.prompt === '0' && m.pricing?.completion === '0')
-            .sort((a, b) => a.id.localeCompare(b.id));
-          if (free.length === 0) {
-            console.log(this.chalk.yellow('  No free models found.\n'));
-            return;
+  fetchModels() {
+    return new Promise((resolve) => {
+      https.get('https://openrouter.ai/api/v1/models', (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            const models = JSON.parse(data).data || [];
+            const free = models
+              .filter((m) => m.pricing?.prompt === '0' && m.pricing?.completion === '0')
+              .sort((a, b) => a.id.localeCompare(b.id));
+            this.cachedModels = free.map((m) => m.id);
+            resolve(free);
+          } catch {
+            resolve([]);
           }
-          for (const m of free) {
-            const ctx = m.context_length ? ` (${(m.context_length / 1024).toFixed(0)}k ctx)` : '';
-            console.log(`  ${this.chalk.yellow(m.id)}${this.chalk.dim(ctx)}`);
-          }
-          console.log(this.chalk.dim(`\n  ${free.length} free models. Use /model <id> to switch.\n`));
-        } catch {
-          console.log(this.chalk.red('  Failed to fetch models.\n'));
-        }
-      });
-    }).on('error', () => {
-      console.log(this.chalk.red('  Failed to fetch models.\n'));
+        });
+      }).on('error', () => resolve([]));
     });
+  }
+
+  async listFreeModels() {
+    process.stdout.write(this.chalk.cyan('  Fetching free models...'));
+    const free = await this.fetchModels();
+    process.stdout.write('\r\x1b[K');
+
+    if (free.length === 0) {
+      console.log(this.chalk.yellow('  No free models found.\n'));
+      return;
+    }
+    console.log();
+    for (const m of free) {
+      const ctx = m.context_length ? ` (${(m.context_length / 1024).toFixed(0)}k ctx)` : '';
+      console.log(`  ${this.chalk.yellow(m.id)}${this.chalk.dim(ctx)}`);
+    }
+    console.log(this.chalk.dim(`\n  ${free.length} free models. Use /model <id> to switch.\n`));
   }
 
   persistSession() {
@@ -155,7 +166,6 @@ class Chat {
     console.log(this.chalk.green(`  Resumed session: ${sessionId}`));
     console.log(this.chalk.dim(`  ${userMsgs.length} messages, model: ${this.model}\n`));
 
-    // Show last exchange
     const lastUser = [...this.messages].reverse().find((m) => m.role === 'user');
     const lastAssistant = [...this.messages].reverse().find((m) => m.role === 'assistant');
     if (lastUser) {
@@ -205,17 +215,14 @@ class Chat {
     try {
       const response = await streamChat(this.apiKey, this.model, this.messages, (chunk) => {
         if (chunks === 0) {
-          // Clear spinner line on first chunk
           process.stdout.write('\r\x1b[K');
         }
         chunks++;
       });
 
       clearInterval(spinTimer);
-      // Clear any spinner remnant and render formatted response
       process.stdout.write('\r\x1b[K');
       const formatted = renderMarkdown(response);
-      // Indent each line for consistent look
       const indented = formatted
         .split('\n')
         .map((line) => '  ' + line)
@@ -236,11 +243,33 @@ class Chat {
   async startLoop() {
     const commandNames = Object.keys(COMMANDS);
 
+    // Pre-fetch models in background for tab completion
+    this.fetchModels().catch(() => {});
+
     const completer = (line) => {
-      if (line.startsWith('/')) {
-        const hits = commandNames.filter((c) => c.startsWith(line.toLowerCase()));
+      const lower = line.toLowerCase();
+
+      // Complete /model <partial> with cached model names
+      if (lower.startsWith('/model ')) {
+        const partial = line.slice(7);
+        const hits = this.cachedModels.filter((m) => m.startsWith(partial));
+        return [hits.length ? hits : this.cachedModels, partial];
+      }
+
+      // Complete /resume <partial> with session IDs
+      if (lower.startsWith('/resume ')) {
+        const partial = line.slice(8);
+        const ids = listSessions().map((s) => s.id);
+        const hits = ids.filter((id) => id.startsWith(partial));
+        return [hits.length ? hits : ids, partial];
+      }
+
+      // Complete slash commands
+      if (lower.startsWith('/')) {
+        const hits = commandNames.filter((c) => c.startsWith(lower));
         return [hits.length ? hits : commandNames, line];
       }
+
       return [[], line];
     };
 
@@ -262,17 +291,18 @@ class Chat {
       }
 
       if (input.startsWith('/')) {
-        const result = this.handleCommand(input);
+        rl.pause();
+        const result = await this.handleCommand(input);
         if (result === 'exit') {
           console.log(this.chalk.dim('Goodbye! 👋\n'));
           rl.close();
           return;
         }
+        rl.resume();
         rl.prompt();
         return;
       }
 
-      // Pause readline while processing
       rl.pause();
       await this.sendMessage(input);
       rl.resume();
@@ -283,7 +313,6 @@ class Chat {
       process.exit(0);
     });
 
-    // Handle Ctrl+C gracefully
     rl.on('SIGINT', () => {
       this.persistSession();
       console.log(this.chalk.dim('\nGoodbye! 👋\n'));
