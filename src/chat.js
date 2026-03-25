@@ -5,6 +5,7 @@ const https = require('https');
 const { streamChat, fetchKeyInfo } = require('./api');
 const { getModel, getSystemPrompt, generateSessionId, saveSession, loadSession, listSessions, getLastSessionId } = require('./config');
 const { renderMarkdown } = require('./render');
+const { StatusBar } = require('./statusbar');
 
 const COMMANDS = {
   '/help': 'Show available commands',
@@ -28,6 +29,7 @@ class Chat {
     this.sessionId = generateSessionId();
     this.cachedModels = [];
     this.keyInfo = null;
+    this.statusBar = new StatusBar(chalk);
   }
 
   writeStatusBar() {
@@ -35,16 +37,13 @@ class Chat {
     const info = this.keyInfo;
 
     const parts = [];
-    if (info.is_free_tier) {
-      parts.push('Free tier');
-    }
+    if (info.is_free_tier) parts.push('Free tier');
     if (info.limit_remaining !== null && info.limit_remaining !== undefined) {
       parts.push(`Credits: $${info.limit_remaining.toFixed(4)}`);
     }
     parts.push(`Today: $${(info.usage_daily || 0).toFixed(4)}`);
 
-    const status = parts.join(' · ');
-    console.log(this.chalk.dim(`  ─── ${status} ───`));
+    this.statusBar.updateRight(parts.join(' │ '));
   }
 
   async refreshKeyInfo() {
@@ -270,6 +269,13 @@ class Chat {
   async startLoop() {
     const commandNames = Object.keys(COMMANDS);
 
+    // Activate persistent bottom status bar
+    this.statusBar.activate();
+    this.statusBar.update(
+      ' /help Commands  /model Switch model  /resume Resume  Ctrl+C Exit',
+      ' Connecting...'
+    );
+
     // Pre-fetch models and key info in background for tab completion and status
     this.fetchModels().catch(() => {});
     this.refreshKeyInfo().catch(() => {});
@@ -277,14 +283,12 @@ class Chat {
     const completer = (line) => {
       const lower = line.toLowerCase();
 
-      // Complete /model <partial> with cached model names
       if (lower.startsWith('/model ')) {
         const partial = line.slice(7);
         const hits = this.cachedModels.filter((m) => m.startsWith(partial));
         return [hits.length ? hits : this.cachedModels, partial];
       }
 
-      // Complete /resume <partial> with session IDs
       if (lower.startsWith('/resume ')) {
         const partial = line.slice(8);
         const ids = listSessions().map((s) => s.id);
@@ -292,7 +296,6 @@ class Chat {
         return [hits.length ? hits : ids, partial];
       }
 
-      // Complete slash commands
       if (lower.startsWith('/')) {
         const hits = commandNames.filter((c) => c.startsWith(lower));
         return [hits.length ? hits : commandNames, line];
@@ -322,6 +325,7 @@ class Chat {
         rl.pause();
         const result = await this.handleCommand(input);
         if (result === 'exit') {
+          this.statusBar.deactivate();
           console.log(this.chalk.dim('Goodbye! 👋\n'));
           rl.close();
           return;
@@ -338,11 +342,13 @@ class Chat {
     });
 
     rl.on('close', () => {
+      this.statusBar.deactivate();
       process.exit(0);
     });
 
     rl.on('SIGINT', () => {
       this.persistSession();
+      this.statusBar.deactivate();
       console.log(this.chalk.dim('\nGoodbye! 👋\n'));
       rl.close();
     });
