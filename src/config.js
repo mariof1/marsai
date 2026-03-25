@@ -37,7 +37,7 @@ function getApiKey() {
 
 function getModel() {
   const config = loadConfig();
-  return process.env.MARSAI_MODEL || config.model || 'anthropic/claude-sonnet-4-20250514';
+  return process.env.MARSAI_MODEL || config.model || 'meta-llama/llama-3.3-70b-instruct:free';
 }
 
 function getSystemPrompt() {

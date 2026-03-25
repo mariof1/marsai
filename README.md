@@ -62,7 +62,7 @@ Config file (`~/.marsai/config.json`):
 ```json
 {
   "apiKey": "sk-or-v1-...",
-  "model": "anthropic/claude-sonnet-4-20250514",
+  "model": "meta-llama/llama-3.3-70b-instruct:free",
   "systemPrompt": "You are MarsAI, a helpful CLI assistant."
 }
 ```
