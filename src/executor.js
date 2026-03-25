@@ -1,7 +1,6 @@
 'use strict';
 
 const { execSync } = require('child_process');
-const readline = require('readline');
 
 const COMMAND_REGEX = /<run_command>([\s\S]*?)<\/run_command>/g;
 
@@ -21,14 +20,30 @@ function stripCommandTags(text) {
 
 function askConfirmation(chalk, command) {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
     console.log();
     console.log(chalk.yellow('  ⚡ MarsAI wants to run:'));
     console.log(chalk.cyan(`  $ ${command}`));
-    rl.question(chalk.yellow('  Run this command? ') + chalk.dim('[Y/n] '), (answer) => {
-      rl.close();
-      const a = answer.trim().toLowerCase();
-      resolve(a === '' || a === 'y' || a === 'yes');
+    process.stdout.write(chalk.yellow('  Run this command? ') + chalk.dim('[Y/n] '));
+
+    // Use raw mode to capture a single keypress without interfering with main readline
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    if (stdin.setRawMode) stdin.setRawMode(true);
+    stdin.resume();
+
+    stdin.once('data', (data) => {
+      if (stdin.setRawMode) stdin.setRawMode(wasRaw);
+      const key = data.toString().trim().toLowerCase();
+
+      // Handle Ctrl+C
+      if (data[0] === 3) {
+        process.stdout.write('\n');
+        resolve(false);
+        return;
+      }
+
+      process.stdout.write(key === 'n' ? 'n\n' : 'y\n');
+      resolve(key !== 'n');
     });
   });
 }
