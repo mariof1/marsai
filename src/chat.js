@@ -226,7 +226,10 @@ class Chat {
 
   async sendMessage(content) {
     this.messages.push({ role: 'user', content });
+    await this._getResponse();
+  }
 
+  async _getResponse() {
     const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let spinIdx = 0;
     let chunks = 0;
@@ -268,10 +271,14 @@ class Chat {
       if (commands.length > 0) {
         const results = await processCommandsInResponse(this.chalk, response);
         if (results && results.some((r) => !r.skipped)) {
-          // Feed results back to the AI for analysis
+          // Feed results back as a system message so AI knows it's output, not a user request
           const resultMsg = buildCommandResultMessage(results);
-          await this.sendMessage(resultMsg);
-          return; // sendMessage recurses, so skip the rest
+          this.messages.push({
+            role: 'user',
+            content: `[COMMAND OUTPUT - Do NOT re-run the same commands. Analyze the output and respond to the user.]\n\n${resultMsg}`,
+          });
+          await this._getResponse();
+          return;
         }
       }
 
@@ -281,7 +288,10 @@ class Chat {
       clearInterval(spinTimer);
       process.stdout.write('\r\x1b[K');
       console.error(this.chalk.red(`  Error: ${err.message}\n`));
-      this.messages.pop();
+      // Remove the last message that caused the error
+      if (this.messages.length > 1) {
+        this.messages.pop();
+      }
     }
   }
 

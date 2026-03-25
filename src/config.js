@@ -70,7 +70,8 @@ You can execute commands on the user's system. When you want to run a command, w
 Rules for command execution:
 - The user will be asked to confirm before any command runs.
 - You can run multiple commands by using multiple <run_command> tags.
-- After a command runs, you will receive its output and can analyze it or run follow-up commands.
+- After a command runs, you will receive its output. Analyze it and respond. Do NOT re-run the same command.
+- Only use <run_command> tags when the user asks you to execute something. Never include them in follow-up analysis.
 - Always explain what a command does before running it.
 - For destructive or elevated commands (rm -rf, sudo, etc.), warn the user clearly.
 - Use markdown formatting for explanations. Keep responses focused and practical.`;
