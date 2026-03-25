@@ -7,6 +7,16 @@ const readline = require('readline');
 
 const CONFIG_DIR = path.join(os.homedir(), '.marsai');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const SESSIONS_DIR = path.join(CONFIG_DIR, 'sessions');
+
+function ensureDirs() {
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  }
+  if (!fs.existsSync(SESSIONS_DIR)) {
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true, mode: 0o700 });
+  }
+}
 
 function loadConfig() {
   if (fs.existsSync(CONFIG_FILE)) {
@@ -20,14 +30,11 @@ function loadConfig() {
 }
 
 function saveConfig(config) {
-  if (!fs.existsSync(CONFIG_DIR)) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
-  }
+  ensureDirs();
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 function getApiKey() {
-  // Priority: env var > config file
   if (process.env.OPENROUTER_API_KEY) {
     return process.env.OPENROUTER_API_KEY;
   }
@@ -61,4 +68,69 @@ function promptForApiKey() {
   });
 }
 
-module.exports = { loadConfig, saveConfig, getApiKey, getModel, getSystemPrompt, promptForApiKey, CONFIG_DIR, CONFIG_FILE };
+// ── Session persistence ──────────────────────────────────────────
+
+function generateSessionId() {
+  const now = new Date();
+  const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const rand = Math.random().toString(36).slice(2, 6);
+  return `${ts}-${rand}`;
+}
+
+function sessionPath(sessionId) {
+  return path.join(SESSIONS_DIR, `${sessionId}.json`);
+}
+
+function saveSession(sessionId, data) {
+  ensureDirs();
+  fs.writeFileSync(sessionPath(sessionId), JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
+function loadSession(sessionId) {
+  const p = sessionPath(sessionId);
+  if (!fs.existsSync(p)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function listSessions() {
+  ensureDirs();
+  const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json'));
+  return files
+    .map((f) => {
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
+        return {
+          id: f.replace('.json', ''),
+          model: data.model || 'unknown',
+          messageCount: (data.messages || []).filter((m) => m.role === 'user').length,
+          preview: getSessionPreview(data.messages || []),
+          updatedAt: data.updatedAt || null,
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+}
+
+function getSessionPreview(messages) {
+  const firstUser = messages.find((m) => m.role === 'user');
+  if (!firstUser) return '(empty)';
+  return firstUser.content.length > 60 ? firstUser.content.slice(0, 60) + '...' : firstUser.content;
+}
+
+function getLastSessionId() {
+  const sessions = listSessions();
+  return sessions.length > 0 ? sessions[0].id : null;
+}
+
+module.exports = {
+  loadConfig, saveConfig, getApiKey, getModel, getSystemPrompt, promptForApiKey,
+  generateSessionId, saveSession, loadSession, listSessions, getLastSessionId,
+  CONFIG_DIR, CONFIG_FILE, SESSIONS_DIR,
+};

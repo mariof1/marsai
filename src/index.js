@@ -29,6 +29,7 @@ async function run() {
     -h, --help        Show this help
     --set-key <key>   Save OpenRouter API key to ~/.marsai/config.json
     --model <model>   Set model for this session
+    --resume [id]     Resume last session (or specify session ID)
 
   Environment Variables:
     OPENROUTER_API_KEY   Your OpenRouter API key (takes priority over config file)
@@ -38,6 +39,9 @@ async function run() {
     /help      Show commands
     /clear     Clear conversation
     /model     Show or change model
+    /models    List free models
+    /resume    Resume last session
+    /sessions  List saved sessions
     /history   Show conversation history
     /exit      Exit
 `);
@@ -85,6 +89,15 @@ async function run() {
     console.log(chalk.cyan(`  Using model: ${chat.model}\n`));
   } else {
     console.log(chalk.dim(`  Model: ${chat.model}\n`));
+  }
+
+  // Handle --resume
+  const resumeIdx = process.argv.indexOf('--resume');
+  if (resumeIdx !== -1) {
+    const resumeId = process.argv[resumeIdx + 1] && !process.argv[resumeIdx + 1].startsWith('--')
+      ? process.argv[resumeIdx + 1]
+      : null;
+    chat.resumeSession(resumeId);
   }
 
   await chat.startLoop();

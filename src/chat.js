@@ -3,7 +3,7 @@
 const readline = require('readline');
 const https = require('https');
 const { streamChat } = require('./api');
-const { getModel, getSystemPrompt } = require('./config');
+const { getModel, getSystemPrompt, generateSessionId, saveSession, loadSession, listSessions, getLastSessionId } = require('./config');
 const { renderMarkdown } = require('./render');
 
 const COMMANDS = {
@@ -11,6 +11,8 @@ const COMMANDS = {
   '/clear': 'Clear conversation history',
   '/model': 'Show or set model (e.g. /model google/gemini-2.0-flash-exp:free)',
   '/models': 'List available free models from OpenRouter',
+  '/resume': 'Resume last session (or /resume <id>)',
+  '/sessions': 'List saved sessions',
   '/system': 'Show current system prompt',
   '/history': 'Show conversation history',
   '/exit': 'Exit MarsAI',
@@ -23,6 +25,7 @@ class Chat {
     this.model = getModel();
     this.systemPrompt = getSystemPrompt();
     this.messages = [{ role: 'system', content: this.systemPrompt }];
+    this.sessionId = generateSessionId();
   }
 
   handleCommand(input) {
@@ -40,7 +43,8 @@ class Chat {
 
       case '/clear':
         this.messages = [{ role: 'system', content: this.systemPrompt }];
-        console.log(this.chalk.green('Conversation cleared.\n'));
+        this.sessionId = generateSessionId();
+        console.log(this.chalk.green('Conversation cleared. New session started.\n'));
         return true;
 
       case '/model':
@@ -54,6 +58,14 @@ class Chat {
 
       case '/models':
         this.listFreeModels();
+        return true;
+
+      case '/resume':
+        this.resumeSession(parts[1] || null);
+        return true;
+
+      case '/sessions':
+        this.showSessions();
         return true;
 
       case '/system':
@@ -77,6 +89,7 @@ class Chat {
       case '/exit':
       case '/quit':
       case '/q':
+        this.persistSession();
         return 'exit';
 
       default:
@@ -111,6 +124,68 @@ class Chat {
     }).on('error', () => {
       console.log(this.chalk.red('  Failed to fetch models.\n'));
     });
+  }
+
+  persistSession() {
+    const userMsgs = this.messages.filter((m) => m.role === 'user');
+    if (userMsgs.length === 0) return;
+    saveSession(this.sessionId, {
+      model: this.model,
+      messages: this.messages,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  resumeSession(id) {
+    const sessionId = id || getLastSessionId();
+    if (!sessionId) {
+      console.log(this.chalk.yellow('  No saved sessions found.\n'));
+      return;
+    }
+    const data = loadSession(sessionId);
+    if (!data) {
+      console.log(this.chalk.red(`  Session "${sessionId}" not found.\n`));
+      return;
+    }
+    this.sessionId = sessionId;
+    this.messages = data.messages || [];
+    this.model = data.model || this.model;
+
+    const userMsgs = this.messages.filter((m) => m.role === 'user');
+    console.log(this.chalk.green(`  Resumed session: ${sessionId}`));
+    console.log(this.chalk.dim(`  ${userMsgs.length} messages, model: ${this.model}\n`));
+
+    // Show last exchange
+    const lastUser = [...this.messages].reverse().find((m) => m.role === 'user');
+    const lastAssistant = [...this.messages].reverse().find((m) => m.role === 'assistant');
+    if (lastUser) {
+      const preview = lastUser.content.length > 100 ? lastUser.content.slice(0, 100) + '...' : lastUser.content;
+      console.log(this.chalk.dim(`  Last message: "${preview}"`));
+    }
+    if (lastAssistant) {
+      const preview = lastAssistant.content.length > 100 ? lastAssistant.content.slice(0, 100) + '...' : lastAssistant.content;
+      console.log(this.chalk.dim(`  Last reply: "${preview}"`));
+    }
+    console.log();
+  }
+
+  showSessions() {
+    const sessions = listSessions();
+    if (sessions.length === 0) {
+      console.log(this.chalk.dim('  No saved sessions.\n'));
+      return;
+    }
+    console.log(this.chalk.cyan('\n  Saved sessions:\n'));
+    for (const s of sessions.slice(0, 15)) {
+      const active = s.id === this.sessionId ? this.chalk.green(' (active)') : '';
+      const date = s.updatedAt ? s.updatedAt.slice(0, 16).replace('T', ' ') : '';
+      console.log(`  ${this.chalk.yellow(s.id)}${active}`);
+      console.log(`    ${this.chalk.dim(date)} · ${s.messageCount} messages · ${s.preview}`);
+    }
+    if (sessions.length > 15) {
+      console.log(this.chalk.dim(`  ... and ${sessions.length - 15} more`));
+    }
+    console.log(this.chalk.dim('\n  Use /resume <id> to resume a session.\n'));
   }
 
   async sendMessage(content) {
@@ -149,6 +224,7 @@ class Chat {
       process.stdout.write(indented + '\n');
 
       this.messages.push({ role: 'assistant', content: response });
+      this.persistSession();
     } catch (err) {
       clearInterval(spinTimer);
       process.stdout.write('\r\x1b[K');
@@ -198,6 +274,7 @@ class Chat {
 
     // Handle Ctrl+C gracefully
     rl.on('SIGINT', () => {
+      this.persistSession();
       console.log(this.chalk.dim('\nGoodbye! 👋\n'));
       rl.close();
     });
