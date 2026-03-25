@@ -6,7 +6,7 @@ const { streamChat, fetchKeyInfo } = require('./api');
 const { getModel, getSystemPrompt, generateSessionId, saveSession, loadSession, listSessions, getLastSessionId } = require('./config');
 const { renderMarkdown } = require('./render');
 const { StatusBar } = require('./statusbar');
-const { extractCommands, stripCommandTags, processCommandsInResponse, buildCommandResultMessage } = require('./executor');
+const { extractCommands, stripCommandTags, executeCommand, displayResult, buildCommandResultMessage } = require('./executor');
 
 const COMMANDS = {
   '/help': 'Show available commands',
@@ -31,6 +31,22 @@ class Chat {
     this.cachedModels = [];
     this.keyInfo = null;
     this.statusBar = new StatusBar(chalk);
+    this.rl = null;
+  }
+
+  askConfirmation(command) {
+    return new Promise((resolve) => {
+      console.log();
+      console.log(this.chalk.yellow('  ⚡ MarsAI wants to run:'));
+      console.log(this.chalk.cyan(`  $ ${command}`));
+      this.rl.question(
+        this.chalk.yellow('  Run this command? ') + this.chalk.dim('[Y/n] '),
+        (answer) => {
+          const a = answer.trim().toLowerCase();
+          resolve(a === '' || a === 'y' || a === 'yes');
+        }
+      );
+    });
   }
 
   writeStatusBar() {
@@ -269,9 +285,25 @@ class Chat {
       // Check for commands to execute
       const commands = extractCommands(response);
       if (commands.length > 0) {
-        const results = await processCommandsInResponse(this.chalk, response);
-        if (results && results.some((r) => !r.skipped)) {
-          // Feed results back as a system message so AI knows it's output, not a user request
+        const results = [];
+        for (const cmd of commands) {
+          this.rl.resume();
+          const confirmed = await this.askConfirmation(cmd);
+          this.rl.pause();
+
+          if (!confirmed) {
+            console.log(this.chalk.dim('  Skipped.\n'));
+            results.push({ command: cmd, skipped: true });
+            continue;
+          }
+
+          console.log(this.chalk.dim('  Running...\n'));
+          const result = executeCommand(cmd);
+          displayResult(this.chalk, result);
+          results.push({ command: cmd, ...result });
+        }
+
+        if (results.some((r) => !r.skipped)) {
           const resultMsg = buildCommandResultMessage(results);
           this.messages.push({
             role: 'user',
@@ -340,6 +372,8 @@ class Chat {
       terminal: true,
       completer,
     });
+
+    this.rl = rl;
 
     rl.prompt();
 

@@ -18,36 +18,6 @@ function stripCommandTags(text) {
   return text.replace(COMMAND_REGEX, '').trim();
 }
 
-function askConfirmation(chalk, command) {
-  return new Promise((resolve) => {
-    console.log();
-    console.log(chalk.yellow('  ⚡ MarsAI wants to run:'));
-    console.log(chalk.cyan(`  $ ${command}`));
-    process.stdout.write(chalk.yellow('  Run this command? ') + chalk.dim('[Y/n] '));
-
-    // Use raw mode to capture a single keypress without interfering with main readline
-    const stdin = process.stdin;
-    const wasRaw = stdin.isRaw;
-    if (stdin.setRawMode) stdin.setRawMode(true);
-    stdin.resume();
-
-    stdin.once('data', (data) => {
-      if (stdin.setRawMode) stdin.setRawMode(wasRaw);
-      const key = data.toString().trim().toLowerCase();
-
-      // Handle Ctrl+C
-      if (data[0] === 3) {
-        process.stdout.write('\n');
-        resolve(false);
-        return;
-      }
-
-      process.stdout.write(key === 'n' ? 'n\n' : 'y\n');
-      resolve(key !== 'n');
-    });
-  });
-}
-
 function executeCommand(command, timeout = 60000) {
   try {
     const output = execSync(command, {
@@ -67,44 +37,24 @@ function executeCommand(command, timeout = 60000) {
   }
 }
 
-async function processCommandsInResponse(chalk, response) {
-  const commands = extractCommands(response);
-  if (commands.length === 0) return null;
-
-  const results = [];
-  for (const cmd of commands) {
-    const confirmed = await askConfirmation(chalk, cmd);
-    if (!confirmed) {
-      console.log(chalk.dim('  Skipped.\n'));
-      results.push({ command: cmd, skipped: true });
-      continue;
+function displayResult(chalk, result) {
+  if (result.output) {
+    const lines = result.output.split('\n');
+    const maxLines = 50;
+    const display = lines.length > maxLines
+      ? [...lines.slice(0, maxLines), `... (${lines.length - maxLines} more lines)`]
+      : lines;
+    for (const line of display) {
+      console.log(chalk.dim('  │ ') + line);
     }
-
-    console.log(chalk.dim('  Running...\n'));
-    const result = executeCommand(cmd);
-
-    if (result.output) {
-      const lines = result.output.split('\n');
-      const maxLines = 50;
-      const display = lines.length > maxLines
-        ? [...lines.slice(0, maxLines), `... (${lines.length - maxLines} more lines)`]
-        : lines;
-      for (const line of display) {
-        console.log(chalk.dim('  │ ') + line);
-      }
-      console.log();
-    }
-
-    if (result.success) {
-      console.log(chalk.green('  ✓ Command completed successfully.\n'));
-    } else {
-      console.log(chalk.red(`  ✗ Command failed (exit code ${result.code}).\n`));
-    }
-
-    results.push({ command: cmd, ...result });
+    console.log();
   }
 
-  return results;
+  if (result.success) {
+    console.log(chalk.green('  ✓ Command completed successfully.\n'));
+  } else {
+    console.log(chalk.red(`  ✗ Command failed (exit code ${result.code}).\n`));
+  }
 }
 
 function buildCommandResultMessage(results) {
@@ -119,4 +69,4 @@ function buildCommandResultMessage(results) {
   return parts.join('\n\n');
 }
 
-module.exports = { extractCommands, stripCommandTags, processCommandsInResponse, buildCommandResultMessage };
+module.exports = { extractCommands, stripCommandTags, executeCommand, displayResult, buildCommandResultMessage };
