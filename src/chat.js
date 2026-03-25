@@ -234,11 +234,22 @@ class Chat {
   }
 
   async startLoop() {
+    const commandNames = Object.keys(COMMANDS);
+
+    const completer = (line) => {
+      if (line.startsWith('/')) {
+        const hits = commandNames.filter((c) => c.startsWith(line.toLowerCase()));
+        return [hits.length ? hits : commandNames, line];
+      }
+      return [[], line];
+    };
+
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
       prompt: this.chalk.green('  You ') + this.chalk.dim('› '),
       terminal: true,
+      completer,
     });
 
     rl.prompt();
