@@ -27,11 +27,20 @@ class StatusBar {
       }
     };
     process.stdout.on('resize', this._resizeHandler);
+
+    // Periodic redraw to recover from readline cursor interference
+    this._drawInterval = setInterval(() => {
+      if (this.active) this._draw();
+    }, 300);
   }
 
   deactivate() {
     if (!this.active) return;
     this.active = false;
+    if (this._drawInterval) {
+      clearInterval(this._drawInterval);
+      this._drawInterval = null;
+    }
     const rows = process.stdout.rows || 24;
     // Reset scroll region to full terminal
     process.stdout.write(`\x1b[1;${rows}r`);
