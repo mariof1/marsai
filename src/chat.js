@@ -400,9 +400,12 @@ class Chat {
     let chunks = 0;
 
     console.log();
+    this.statusBar._draw();
     const spinTimer = setInterval(() => {
       if (chunks === 0) {
         process.stdout.write(`\r\x1b[K  ${this.chalk.magenta(spinner[spinIdx++ % spinner.length])} ${this.chalk.dim('Thinking...')}`);
+        // Redraw bottom area every ~2 seconds to prevent glitches
+        if (spinIdx % 25 === 0) this.statusBar._draw();
       }
     }, 80);
 
@@ -428,6 +431,7 @@ class Chat {
         process.stdout.write(this.chalk.magenta('  MarsAI ') + this.chalk.dim('›\n'));
         process.stdout.write(indented + '\n');
       }
+      this.statusBar._draw();
 
       this.messages.push({ role: 'assistant', content: response });
 
@@ -450,6 +454,7 @@ class Chat {
           const result = executeCommand(cmd);
           displayResult(this.chalk, result);
           if (result.changedDir) this.statusBar.updateCwd();
+          this.statusBar._draw();
           results.push({ command: cmd, ...result });
         }
 
@@ -470,6 +475,7 @@ class Chat {
       clearInterval(spinTimer);
       process.stdout.write('\r\x1b[K');
       console.error(this.chalk.red(`  Error: ${err.message}\n`));
+      this.statusBar._draw();
       // Remove the last message that caused the error
       if (this.messages.length > 1) {
         this.messages.pop();
