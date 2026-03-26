@@ -551,6 +551,9 @@ class Chat {
         return;
       }
 
+      // Redraw status bar immediately (readline's newline may have pushed it)
+      this.statusBar._draw();
+
       // Buffer rapid lines for multi-line paste detection
       this._lineBuffer.push(line);
       if (this._lineTimer) clearTimeout(this._lineTimer);
