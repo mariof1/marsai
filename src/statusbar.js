@@ -64,6 +64,7 @@ class StatusBar {
     if (!this.enabled) return;
     const rows = process.stdout.rows || 24;
     process.stdout.write(`\x1b[${rows - 2};1H`);
+    this._draw();
   }
 
   _setup() {
