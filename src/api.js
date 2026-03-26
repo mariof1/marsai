@@ -5,7 +5,7 @@ const https = require('https');
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 const MAX_RETRIES = 3;
-const RETRY_DELAYS = [5000, 15000, 30000];
+const RETRY_DELAYS = [2000, 5000, 10000];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,7 +53,6 @@ function collectBody(res) {
 function parseErrorMessage(statusCode, body) {
   try {
     const parsed = JSON.parse(body);
-    // OpenRouter wraps errors in metadata sometimes
     const msg = parsed.error?.message || parsed.error?.metadata?.raw || JSON.stringify(parsed.error) || body;
     return `API error (${statusCode}): ${msg}`;
   } catch {
@@ -61,7 +60,8 @@ function parseErrorMessage(statusCode, body) {
   }
 }
 
-async function streamChat(apiKey, model, messages, onChunk) {
+// onRetry(reason, delaySecs, attempt, maxRetries) - called before each retry wait
+async function streamChat(apiKey, model, messages, onChunk, onRetry) {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await makeRequest(apiKey, model, messages, true);
 
@@ -101,11 +101,17 @@ async function streamChat(apiKey, model, messages, onChunk) {
 
     const body = await collectBody(res);
 
-    // Retry on 429 or 5xx
+    // Don't retry on permanent rate limits (daily/quota exhausted)
+    if (res.statusCode === 429 && /per-day|daily|quota/i.test(body)) {
+      throw new Error(parseErrorMessage(res.statusCode, body));
+    }
+
+    // Retry on 429 (per-minute) or 5xx server errors
     if ((res.statusCode === 429 || res.statusCode >= 500) && attempt < MAX_RETRIES) {
       const delay = RETRY_DELAYS[attempt] || 10000;
       const secs = (delay / 1000).toFixed(0);
-      onChunk(`\n  ⏳ ${res.statusCode === 429 ? 'Rate limited' : 'Server error'} — retrying in ${secs}s (${attempt + 1}/${MAX_RETRIES})...`);
+      const reason = res.statusCode === 429 ? 'Rate limited' : 'Server error';
+      if (onRetry) onRetry(reason, secs, attempt + 1, MAX_RETRIES);
       await sleep(delay);
       continue;
     }
@@ -113,8 +119,6 @@ async function streamChat(apiKey, model, messages, onChunk) {
     throw new Error(parseErrorMessage(res.statusCode, body));
   }
 }
-
-module.exports = { streamChat };
 
 function fetchKeyInfo(apiKey) {
   return new Promise((resolve) => {

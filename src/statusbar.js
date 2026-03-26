@@ -78,14 +78,10 @@ class StatusBar {
     const rows = process.stdout.rows || 24;
     const cols = process.stdout.columns || 80;
 
-    // --- Draw cwd line at row (rows-1) ---
+    // Build cwd line
     const cwdLine = this.chalk ? this.chalk.dim(` 📂 ${this.cwdText}`) : ` 📂 ${this.cwdText}`;
-    process.stdout.write('\x1b[s');
-    process.stdout.write(`\x1b[${rows - 1};1H`);
-    process.stdout.write('\x1b[2K');
-    process.stdout.write(cwdLine);
 
-    // --- Draw status bar at row (rows) ---
+    // Build status bar
     const left = this.leftText || '';
     const right = this.rightText || '';
     const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -94,10 +90,14 @@ class StatusBar {
     const gap = Math.max(1, cols - leftLen - rightLen);
     const bar = left + ' '.repeat(gap) + right;
 
-    process.stdout.write(`\x1b[${rows};1H`);
-    process.stdout.write('\x1b[2K');
-    process.stdout.write(`\x1b[7m${bar}\x1b[0m`);
-    process.stdout.write('\x1b[u');
+    // Write everything in a single atomic operation to prevent flickering
+    const buf =
+      '\x1b[s' +                              // save cursor
+      `\x1b[${rows - 1};1H\x1b[2K` + cwdLine + // cwd line
+      `\x1b[${rows};1H\x1b[2K` +              // clear status line
+      `\x1b[7m${bar}\x1b[0m` +                // status bar (reverse video)
+      '\x1b[u';                                // restore cursor
+    process.stdout.write(buf);
   }
 }
 

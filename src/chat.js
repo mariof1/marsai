@@ -398,24 +398,34 @@ class Chat {
     const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     let spinIdx = 0;
     let chunks = 0;
+    let retryMsg = '';
 
     console.log();
     this.statusBar._draw();
     const spinTimer = setInterval(() => {
       if (chunks === 0) {
-        process.stdout.write(`\r\x1b[K  ${this.chalk.magenta(spinner[spinIdx++ % spinner.length])} ${this.chalk.dim('Thinking...')}`);
-        // Redraw bottom area every ~2 seconds to prevent glitches
+        const icon = this.chalk.magenta(spinner[spinIdx++ % spinner.length]);
+        const text = retryMsg
+          ? this.chalk.yellow(retryMsg)
+          : this.chalk.dim('Thinking...');
+        process.stdout.write(`\r\x1b[K  ${icon} ${text}`);
         if (spinIdx % 25 === 0) this.statusBar._draw();
       }
     }, 80);
 
     try {
-      const response = await streamChat(this.apiKey, this.model, this.messages, (chunk) => {
-        if (chunks === 0) {
-          process.stdout.write('\r\x1b[K');
+      const response = await streamChat(this.apiKey, this.model, this.messages,
+        (chunk) => {
+          if (chunks === 0) {
+            retryMsg = '';
+            process.stdout.write('\r\x1b[K');
+          }
+          chunks++;
+        },
+        (reason, secs, attempt, maxRetries) => {
+          retryMsg = `${reason} — retrying in ${secs}s (${attempt}/${maxRetries})...`;
         }
-        chunks++;
-      });
+      );
 
       clearInterval(spinTimer);
       process.stdout.write('\r\x1b[K');
