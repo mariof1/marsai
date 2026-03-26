@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const readline = require('readline');
 const https = require('https');
 const { streamChat, fetchKeyInfo } = require('./api');
@@ -8,11 +10,19 @@ const { renderMarkdown } = require('./render');
 const { StatusBar } = require('./statusbar');
 const { extractCommands, stripCommandTags, executeCommand, displayResult, buildCommandResultMessage } = require('./executor');
 
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
+const MIME_TYPES = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp', '.svg': 'image/svg+xml',
+};
+
 const COMMANDS = {
   '/help': 'Show available commands',
   '/clear': 'Clear conversation history',
   '/model': 'Show or set model (e.g. /model google/gemini-2.0-flash-exp:free)',
   '/models': 'List available free models from OpenRouter',
+  '/paste': 'Multi-line input mode (end with --- on its own line)',
+  '/attach': 'Attach a file or image (e.g. /attach error.log)',
   '/resume': 'Resume last session (or /resume <id>)',
   '/sessions': 'List saved sessions',
   '/system': 'Show current system prompt',
@@ -32,6 +42,10 @@ class Chat {
     this.keyInfo = null;
     this.statusBar = new StatusBar(chalk);
     this.rl = null;
+    this.pendingAttachments = [];
+    this._pasteMode = false;
+    this._pasteLines = null;
+    this._pasteResolve = null;
   }
 
   askConfirmation(command) {
@@ -52,7 +66,105 @@ class Chat {
 
   _prompt() {
     this.statusBar.cursorToBottom();
+    if (this.pendingAttachments.length > 0) {
+      const count = this.pendingAttachments.length;
+      this.rl.setPrompt(this.chalk.green('  You ') + this.chalk.cyan(`[📎${count}] `) + this.chalk.dim('› '));
+    } else {
+      this.rl.setPrompt(this.chalk.green('  You ') + this.chalk.dim('› '));
+    }
     this.rl.prompt();
+  }
+
+  // Multi-line paste mode: uses main readline with a state flag
+  enterPasteMode() {
+    return new Promise((resolve) => {
+      console.log(this.chalk.cyan('\n  📋 Paste mode — type or paste content below.'));
+      console.log(this.chalk.dim('  End with --- on its own line.\n'));
+      this.statusBar.cursorToBottom();
+
+      this._pasteLines = [];
+      this._pasteResolve = resolve;
+      this._pasteMode = true;
+      this.rl.setPrompt(this.chalk.dim('  │ '));
+      this.rl.prompt();
+    });
+  }
+
+  _handlePasteLine(line) {
+    if (line.trim() === '---') {
+      this._pasteMode = false;
+      const content = this._pasteLines.join('\n');
+      const resolve = this._pasteResolve;
+      this._pasteLines = null;
+      this._pasteResolve = null;
+      resolve(content);
+      return;
+    }
+    this._pasteLines.push(line);
+    this.rl.setPrompt(this.chalk.dim('  │ '));
+    this.rl.prompt();
+  }
+
+  // Attach a file (text or image)
+  attachFile(filePath) {
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) {
+      console.log(this.chalk.red(`  File not found: ${resolved}\n`));
+      return false;
+    }
+
+    const ext = path.extname(resolved).toLowerCase();
+    const isImage = IMAGE_EXTS.has(ext);
+    const stats = fs.statSync(resolved);
+    const maxSize = isImage ? 20 * 1024 * 1024 : 512 * 1024; // 20MB images, 512KB text
+
+    if (stats.size > maxSize) {
+      const limit = isImage ? '20MB' : '512KB';
+      console.log(this.chalk.red(`  File too large (max ${limit}): ${resolved}\n`));
+      return false;
+    }
+
+    if (isImage) {
+      const data = fs.readFileSync(resolved).toString('base64');
+      const mime = MIME_TYPES[ext] || 'image/png';
+      this.pendingAttachments.push({ type: 'image', path: resolved, data, mime, name: path.basename(resolved) });
+      console.log(this.chalk.green(`  📎 Image attached: ${path.basename(resolved)} (${(stats.size / 1024).toFixed(1)}KB)\n`));
+    } else {
+      const content = fs.readFileSync(resolved, 'utf-8');
+      this.pendingAttachments.push({ type: 'text', path: resolved, content, name: path.basename(resolved) });
+      console.log(this.chalk.green(`  📎 File attached: ${path.basename(resolved)} (${content.split('\n').length} lines)\n`));
+    }
+    return true;
+  }
+
+  // Build message content with optional attachments
+  buildMessageContent(text) {
+    const attachments = this.pendingAttachments.splice(0);
+    const hasImages = attachments.some((a) => a.type === 'image');
+    const textAttachments = attachments.filter((a) => a.type === 'text');
+
+    // Append text file contents to the message
+    let fullText = text;
+    if (textAttachments.length > 0) {
+      const fileParts = textAttachments.map((a) =>
+        `\n\n--- File: ${a.name} ---\n${a.content}\n--- End of ${a.name} ---`
+      );
+      fullText += fileParts.join('');
+    }
+
+    // If there are images, use multimodal content array
+    if (hasImages) {
+      const content = [{ type: 'text', text: fullText }];
+      for (const img of attachments.filter((a) => a.type === 'image')) {
+        content.push({
+          type: 'image_url',
+          image_url: { url: `data:${img.mime};base64,${img.data}` },
+        });
+      }
+      return content;
+    }
+
+    return fullText;
   }
 
   writeStatusBar() {
@@ -109,6 +221,34 @@ class Chat {
         await this.listFreeModels();
         return true;
 
+      case '/paste': {
+        this.rl.resume();
+        const pastedContent = await this.enterPasteMode();
+        if (pastedContent && pastedContent.trim()) {
+          this.rl.pause();
+          await this.sendMessage(pastedContent);
+        } else {
+          console.log(this.chalk.dim('  Empty paste, nothing sent.\n'));
+        }
+        return true;
+      }
+
+      case '/attach': {
+        const filePath = input.slice(8).trim();
+        if (!filePath) {
+          console.log(this.chalk.yellow('  Usage: /attach <filepath>\n'));
+          if (this.pendingAttachments.length > 0) {
+            console.log(this.chalk.dim(`  ${this.pendingAttachments.length} file(s) pending. Send a message to include them.\n`));
+          }
+          return true;
+        }
+        this.attachFile(filePath);
+        if (this.pendingAttachments.length > 0) {
+          console.log(this.chalk.dim('  Send a message to include attached files. Or /attach more files.\n'));
+        }
+        return true;
+      }
+
       case '/resume':
         this.resumeSession(parts[1] || null);
         return true;
@@ -128,8 +268,10 @@ class Chat {
         } else {
           for (const m of userMsgs) {
             const label = m.role === 'user' ? this.chalk.green('You') : this.chalk.magenta('MarsAI');
-            const preview = m.content.length > 80 ? m.content.slice(0, 80) + '...' : m.content;
-            console.log(`  ${label}: ${preview}`);
+            const text = typeof m.content === 'string' ? m.content : m.content.find((c) => c.type === 'text')?.text || '';
+            const preview = text.length > 80 ? text.slice(0, 80) + '...' : text;
+            const hasImage = Array.isArray(m.content) && m.content.some((c) => c.type === 'image_url');
+            console.log(`  ${label}: ${preview}${hasImage ? ' 🖼️' : ''}`);
           }
           console.log();
         }
@@ -247,7 +389,8 @@ class Chat {
   }
 
   async sendMessage(content) {
-    this.messages.push({ role: 'user', content });
+    const msgContent = this.buildMessageContent(content);
+    this.messages.push({ role: 'user', content: msgContent });
     await this._getResponse();
   }
 
@@ -383,6 +526,12 @@ class Chat {
     this._prompt();
 
     rl.on('line', async (line) => {
+      // Handle paste mode input
+      if (this._pasteMode) {
+        this._handlePasteLine(line);
+        return;
+      }
+
       const input = line.trim();
       if (!input) {
         this._prompt();
@@ -415,6 +564,17 @@ class Chat {
     });
 
     rl.on('SIGINT', () => {
+      if (this._pasteMode) {
+        this._pasteMode = false;
+        this._pasteLines = null;
+        if (this._pasteResolve) {
+          this._pasteResolve(null);
+          this._pasteResolve = null;
+        }
+        console.log(this.chalk.dim('\n  Paste cancelled.\n'));
+        this._prompt();
+        return;
+      }
       this.persistSession();
       this.statusBar.deactivate();
       console.log(this.chalk.dim('\nGoodbye! 👋\n'));
