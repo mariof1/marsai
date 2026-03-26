@@ -256,10 +256,10 @@ class Chat {
     let spinIdx = 0;
     let chunks = 0;
 
-    process.stdout.write(this.chalk.magenta('\n  MarsAI ') + this.chalk.dim('› '));
+    console.log();
     const spinTimer = setInterval(() => {
       if (chunks === 0) {
-        process.stdout.write(`\r  ${this.chalk.magenta(spinner[spinIdx++ % spinner.length])} ${this.chalk.dim('Thinking...')}`);
+        process.stdout.write(`\r\x1b[K  ${this.chalk.magenta(spinner[spinIdx++ % spinner.length])} ${this.chalk.dim('Thinking...')}`);
       }
     }, 80);
 
