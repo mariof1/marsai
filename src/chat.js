@@ -46,6 +46,8 @@ class Chat {
     this._pasteMode = false;
     this._pasteLines = null;
     this._pasteResolve = null;
+    this._lineBuffer = [];
+    this._lineTimer = null;
   }
 
   askConfirmation(command) {
@@ -542,37 +544,46 @@ class Chat {
 
     this._prompt();
 
-    rl.on('line', async (line) => {
+    rl.on('line', (line) => {
       // Handle paste mode input
       if (this._pasteMode) {
         this._handlePasteLine(line);
         return;
       }
 
-      const input = line.trim();
-      if (!input) {
-        this._prompt();
-        return;
-      }
+      // Buffer rapid lines for multi-line paste detection
+      this._lineBuffer.push(line);
+      if (this._lineTimer) clearTimeout(this._lineTimer);
+      this._lineTimer = setTimeout(async () => {
+        const lines = this._lineBuffer.splice(0);
+        this._lineTimer = null;
 
-      if (input.startsWith('/')) {
-        rl.pause();
-        const result = await this.handleCommand(input);
-        if (result === 'exit') {
-          this.statusBar.deactivate();
-          console.log(this.chalk.dim('Goodbye! 👋\n'));
-          rl.close();
+        const input = lines.join('\n').trim();
+        if (!input) {
+          this._prompt();
           return;
         }
+
+        // Only treat as command if single-line input starting with /
+        if (lines.length === 1 && input.startsWith('/')) {
+          rl.pause();
+          const result = await this.handleCommand(input);
+          if (result === 'exit') {
+            this.statusBar.deactivate();
+            console.log(this.chalk.dim('Goodbye! 👋\n'));
+            rl.close();
+            return;
+          }
+          rl.resume();
+          this._prompt();
+          return;
+        }
+
+        rl.pause();
+        await this.sendMessage(input);
         rl.resume();
         this._prompt();
-        return;
-      }
-
-      rl.pause();
-      await this.sendMessage(input);
-      rl.resume();
-      this._prompt();
+      }, 50);
     });
 
     rl.on('close', () => {
