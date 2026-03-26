@@ -16,9 +16,13 @@ class StatusBar {
     if (!this.enabled) return;
     this.active = true;
     this._setup();
+    this.cursorToBottom();
 
     this._resizeHandler = () => {
-      if (this.active) this._setup();
+      if (this.active) {
+        this._setup();
+        this.cursorToBottom();
+      }
     };
     process.stdout.on('resize', this._resizeHandler);
   }
@@ -43,6 +47,13 @@ class StatusBar {
     if (left !== undefined) this.leftText = left;
     if (right !== undefined) this.rightText = right;
     if (this.active) this._draw();
+  }
+
+  // Position cursor at bottom of scroll region (just above status bar)
+  cursorToBottom() {
+    if (!this.enabled) return;
+    const rows = process.stdout.rows || 24;
+    process.stdout.write(`\x1b[${rows - 1};1H`);
   }
 
   _setup() {

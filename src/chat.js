@@ -39,6 +39,7 @@ class Chat {
       console.log();
       console.log(this.chalk.yellow('  ⚡ MarsAI wants to run:'));
       console.log(this.chalk.cyan(`  $ ${command}`));
+      this.statusBar.cursorToBottom();
       this.rl.question(
         this.chalk.yellow('  Run this command? ') + this.chalk.dim('[Y/n] '),
         (answer) => {
@@ -47,6 +48,11 @@ class Chat {
         }
       );
     });
+  }
+
+  _prompt() {
+    this.statusBar.cursorToBottom();
+    this.rl.prompt();
   }
 
   writeStatusBar() {
@@ -374,12 +380,12 @@ class Chat {
 
     this.rl = rl;
 
-    rl.prompt();
+    this._prompt();
 
     rl.on('line', async (line) => {
       const input = line.trim();
       if (!input) {
-        rl.prompt();
+        this._prompt();
         return;
       }
 
@@ -393,14 +399,14 @@ class Chat {
           return;
         }
         rl.resume();
-        rl.prompt();
+        this._prompt();
         return;
       }
 
       rl.pause();
       await this.sendMessage(input);
       rl.resume();
-      rl.prompt();
+      this._prompt();
     });
 
     rl.on('close', () => {
