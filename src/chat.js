@@ -449,6 +449,7 @@ class Chat {
           console.log(this.chalk.dim('  Running...\n'));
           const result = executeCommand(cmd);
           displayResult(this.chalk, result);
+          if (result.changedDir) this.statusBar.updateCwd();
           results.push({ command: cmd, ...result });
         }
 

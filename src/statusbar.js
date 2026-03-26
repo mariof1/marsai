@@ -1,12 +1,13 @@
 'use strict';
 
-// Persistent bottom status bar using ANSI scroll regions.
+// Persistent bottom area: directory line + status bar using ANSI scroll regions.
 
 class StatusBar {
   constructor(chalk) {
     this.chalk = chalk;
     this.leftText = '';
     this.rightText = '';
+    this.cwdText = '';
     this.enabled = process.stdout.isTTY || false;
     this.active = false;
     this._resizeHandler = null;
@@ -15,6 +16,7 @@ class StatusBar {
   activate() {
     if (!this.enabled) return;
     this.active = true;
+    this.updateCwd();
     this._setup();
     this.cursorToBottom();
 
@@ -33,10 +35,11 @@ class StatusBar {
     const rows = process.stdout.rows || 24;
     // Reset scroll region to full terminal
     process.stdout.write(`\x1b[1;${rows}r`);
-    // Clear the status bar line
+    // Clear both bottom lines
+    process.stdout.write(`\x1b[${rows - 1};1H\x1b[2K`);
     process.stdout.write(`\x1b[${rows};1H\x1b[2K`);
     // Move cursor up
-    process.stdout.write(`\x1b[${rows - 1};1H`);
+    process.stdout.write(`\x1b[${rows - 2};1H`);
 
     if (this._resizeHandler) {
       process.stdout.removeListener('resize', this._resizeHandler);
@@ -49,17 +52,24 @@ class StatusBar {
     if (this.active) this._draw();
   }
 
-  // Position cursor at bottom of scroll region (just above status bar)
+  updateCwd() {
+    const cwd = process.cwd();
+    const home = require('os').homedir();
+    this.cwdText = cwd.startsWith(home) ? '~' + cwd.slice(home.length) : cwd;
+    if (this.active) this._draw();
+  }
+
+  // Position cursor at bottom of scroll region (just above the 2 reserved lines)
   cursorToBottom() {
     if (!this.enabled) return;
     const rows = process.stdout.rows || 24;
-    process.stdout.write(`\x1b[${rows - 1};1H`);
+    process.stdout.write(`\x1b[${rows - 2};1H`);
   }
 
   _setup() {
     const rows = process.stdout.rows || 24;
-    // Set scroll region to exclude last line
-    process.stdout.write(`\x1b[1;${rows - 1}r`);
+    // Reserve bottom 2 lines: cwd line + status bar
+    process.stdout.write(`\x1b[1;${rows - 2}r`);
     this._draw();
   }
 
@@ -68,23 +78,26 @@ class StatusBar {
     const rows = process.stdout.rows || 24;
     const cols = process.stdout.columns || 80;
 
+    // --- Draw cwd line at row (rows-1) ---
+    const cwdLine = this.chalk ? this.chalk.dim(` 📂 ${this.cwdText}`) : ` 📂 ${this.cwdText}`;
+    process.stdout.write('\x1b[s');
+    process.stdout.write(`\x1b[${rows - 1};1H`);
+    process.stdout.write('\x1b[2K');
+    process.stdout.write(cwdLine);
+
+    // --- Draw status bar at row (rows) ---
     const left = this.leftText || '';
     const right = this.rightText || '';
-
-    // Strip ANSI for length calculation
     const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
     const leftLen = stripAnsi(left).length;
     const rightLen = stripAnsi(right).length;
     const gap = Math.max(1, cols - leftLen - rightLen);
-
     const bar = left + ' '.repeat(gap) + right;
 
-    // Save cursor, move to bottom row, draw bar, restore cursor
-    process.stdout.write('\x1b[s'); // save cursor position
-    process.stdout.write(`\x1b[${rows};1H`); // move to last row
-    process.stdout.write('\x1b[2K'); // clear line
-    process.stdout.write(`\x1b[7m${bar}\x1b[0m`); // reverse video
-    process.stdout.write('\x1b[u'); // restore cursor position
+    process.stdout.write(`\x1b[${rows};1H`);
+    process.stdout.write('\x1b[2K');
+    process.stdout.write(`\x1b[7m${bar}\x1b[0m`);
+    process.stdout.write('\x1b[u');
   }
 }
 

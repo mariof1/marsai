@@ -19,6 +19,19 @@ function stripCommandTags(text) {
 }
 
 function executeCommand(command, timeout = 60000) {
+  // Handle cd commands by changing the process working directory
+  const cdMatch = command.match(/^cd\s+(.+)$/);
+  if (cdMatch) {
+    try {
+      const target = cdMatch[1].replace(/^~/, require('os').homedir()).replace(/["']/g, '');
+      const resolved = require('path').resolve(target);
+      process.chdir(resolved);
+      return { success: true, output: resolved, changedDir: true };
+    } catch (err) {
+      return { success: false, output: err.message, code: 1 };
+    }
+  }
+
   try {
     const output = execSync(command, {
       encoding: 'utf-8',
